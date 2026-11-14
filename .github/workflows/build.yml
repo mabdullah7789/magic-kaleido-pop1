@@ -1,0 +1,188 @@
+name: Build Android AAB
+
+
+
+on:
+
+  push:
+
+    branches: [ "main", "master" ]
+
+  workflow_dispatch:
+
+
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      - name: Checkout repository
+
+        uses: actions/checkout@v4
+
+
+
+      - name: Set up Python 3.10
+
+        uses: actions/setup-python@v5
+
+        with:
+
+          python-version: '3.10'
+
+
+
+      - name: Set up Java JDK 17
+
+        uses: actions/setup-java@v4
+
+        with:
+
+          distribution: 'temurin'
+
+          java-version: '17'
+
+
+
+      - name: Prepare buildozer.spec and Upload Keystore
+
+        run: |
+
+          ls -la
+
+          if [ -f "buildozer_spec.txt" ] && [ ! -f "buildozer.spec" ]; then
+
+            cp buildozer_spec.txt buildozer.spec
+
+          fi
+
+          if [ ! -f "buildozer.spec" ]; then
+
+            echo "ERROR: buildozer.spec is missing from repository root!"
+
+            exit 1
+
+          fi
+
+          if [ ! -f "main.py" ]; then
+
+            echo "ERROR: main.py is missing from repository root!"
+
+            exit 1
+
+          fi
+
+          sed -i 's/^p4a.branch = master/# p4a.branch = master/g' buildozer.spec
+
+          sed -i 's/^android.api = 36/android.api = 34/g' buildozer.spec
+
+          rm -f "$GITHUB_WORKSPACE/upload-key.jks"
+
+          keytool -genkeypair -v \
+
+            -keystore "$GITHUB_WORKSPACE/upload-key.jks" \
+
+            -keyalg RSA -keysize 2048 -validity 10000 \
+
+            -alias upload \
+
+            -storepass KaleidoPop2026 \
+
+            -keypass KaleidoPop2026 \
+
+            -dname "CN=Muhammad Abdullah, OU=GameDev, O=AbdullahStudios, L=Kamalia, S=Punjab, C=PK"
+
+
+
+      - name: Install Linux System Dependencies
+
+        run: |
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+
+            git zip unzip autoconf libtool pkg-config \
+
+            zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
+
+            cmake libffi-dev libssl-dev automake \
+
+            lld libltdl-dev build-essential ccache patch
+
+
+
+      - name: Install Buildozer and Cython
+
+        run: |
+
+          pip install --upgrade "pip<24.1" "setuptools<70.0.0" wheel
+
+          pip install buildozer==1.5.0 cython==0.29.33 virtualenv packaging appdirs
+
+
+
+      - name: Build Debug APK for Phone
+
+        run: |
+
+          yes | buildozer android debug
+
+
+
+      - name: Upload Debug APK
+
+        if: always()
+
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: debug-apk-for-phone
+
+          path: bin/*.apk
+
+
+
+      - name: Build and Sign Release AAB for Play Store
+
+        env:
+
+          P4A_RELEASE_KEYSTORE: ${{ github.workspace }}/upload-key.jks
+
+          P4A_RELEASE_KEYSTORE_PASSWD: KaleidoPop2026
+
+          P4A_RELEASE_KEYALIAS_PASSWD: KaleidoPop2026
+
+          P4A_RELEASE_KEYALIAS: upload
+
+        run: |
+
+          yes | buildozer android release
+
+          cp "$GITHUB_WORKSPACE/upload-key.jks" bin/upload-key.jks
+
+
+
+      - name: Upload Play Store AAB and Keystore
+
+        if: always()
+
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: playstore-release-aab
+
+          path: |
+
+            bin/*.aab
+
+            bin/upload-key.jks
+
+            bin/*.apk
+
